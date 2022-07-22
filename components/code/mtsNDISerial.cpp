@@ -1128,7 +1128,9 @@ void mtsNDISerial::PortHandlesEnable(void)
             return;
         }
 
-        if (tool->MainType == std::string("01")) {  // reference
+        if (tool->MainType == std::string("00")) {  // Unspecified type
+            CommandAppend("D");  // dynamic
+        } else if (tool->MainType == std::string("01")) {  // reference
             CommandAppend("S");  // static
         } else if (tool->MainType == std::string("02")) {  // probe
             CommandAppend("D");  // dynamic
