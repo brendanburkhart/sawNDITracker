@@ -1,5 +1,6 @@
 import argparse
 import ndi_tool
+import pathlib
 
 
 class ToolDefinition:
@@ -10,13 +11,13 @@ class ToolDefinition:
 
     def from_json(json):
         def point_to_array(point):
-            return np.array([point.x, point.y, point.z])
+            return np.array([point["x"], point["y"], point["z"]])
 
-        assert json.count == len(json.fiducials)
-        pivot = point_to_array(json.pivot)
-        markers = [point_to_array(f) for f in json.fiducials]
+        assert json.count == len(json["fiducials"])
+        pivot = point_to_array(json["pivot"]) if "pivot" in json else None
+        markers = [point_to_array(f) for f in json["fiducials"]]
 
-        tool_id = json.id if "id" in json else None
+        tool_id = json.get("id", None)
 
         return ToolDefinition(tool_id, markers, pivot)
 
@@ -29,11 +30,13 @@ class ToolDefinition:
         json = {
             "count": len(self.markers),
             "fiducials": fiducials,
-            "pivot": array_to_point(self.pivot),
         }
     
         if self.id is not None:
             json["id"] = self.id
+
+        if self.pivot is not None:
+            json["pivot"] = self.pivot
 
         return json
 
@@ -41,12 +44,24 @@ class ToolDefinition:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("input", metavar="f", type=str, help="Input file")
+    parser.add_argument("-i", "--input", type=str, help="Input file")
+    parser.add_argument("-o", "--output", type=str, default="", help="Output file")
     args = parser.parse_args()
 
+    input_extension = pathlib.Path(args.input).suffix
+    output_extension = pathlib.Path(args.output).suffix
+
     with open(args.input, "rb") as f:
-        tool = ndi_tool.NDIToolDefinition()
-        tool.from_rom(f.read())
+        if input_extension == ".rom":
+            tool = ndi_tool.NDIToolDefinition()
+            data = f.read()
+            tool.from_rom(data)
+
         std_tool = tool.to_standard()
-        print(std_tool.to_json())
+
+    with open(args.output, "wb") as f:
+        data = tool.to_rom()
+        f.write(data)
+
+    print(std_tool.to_json())
 

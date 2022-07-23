@@ -9,42 +9,48 @@ NDI .rom file format:
 
 little endian
 
-byte 0-2:   "NDI"
-byte 3: 0?
-byte 4-5: checksum - literally sum of bytes 6 to end
-byte 8:
-byte 12: tool sub type
-byte 15: tool main type
-byte 16-17: tool revision
-byte 20: sequence number, also lower two bits of 21
-byte 21-23: timestamp - see parse_timestamp()
-byte 28:     marker count
-byte 32: minimum marker count?
-byte 39: 64 - why?
-from byte 72:
-    4 byte floats, every 3 is a marker
-
-from byte 312:
-    4 byte floats, every 3 is a vectex normal
-
+byte 0-2:     "NDI"
+byte 3:       0?
+byte 4-5:     checksum - literally sum of bytes 6 to end
+byte 8:       1?
+byte 12:      tool sub type
+byte 15:      tool main type
+byte 16-17:   tool revision
+byte 20:      sequence number, also lower two bits of 21
+byte 21-23:   timestamp - see parse_timestamp()
+byte 24:      minimum marker angle, degrees, int8
+byte 28:      marker count
+byte 32:      minimum marker count
+    If tool has many markers, can track with just subset,
+    this configures how many the tracker should require
+byte 39:      64 - why?
+byte 72-311:  xyz point, float32 markers, max of 20
+byte 312-551: xyz vector, float32 marker normals
+byte 552-554: 0, 1, 2?
 byte 572-575: 31?
-byte 576: 9
+byte 576:     9
+byte 580-?:   Tool manufacturer - find offset from data
+byte 592-593: Part number
 
----- is position fixed? or depend on number of markers?
-bytes 580-?: Manufacturer - find offset from data
-bytes 592-593: Part number
-
-byte 612:
-byte 613-: face assignments of markers
-
+byte 612:     9?
+byte 613-632: face assignments of markers
+byte 633-652: more assignments?
 byte 653-655: 128, 0, 41
+byte 656-751: xyz vector, float32 face normals, max 8 faces
 
-byte 656: vec3f face normals, max 8 faces
+total length: 752 bytes, seems to be fixed
 """
 
 class NDIToolDefinition:
+    marker_count_byte = 28
+    minimum_markers_byte = 32
     marker_data_start = 72
+    marker_normals_bytes = slice(312, 552)
     checksum_bytes = slice(4, 6)
+
+    minimum_marker_angle_byte = 24
+
+    ndi_rom_length = 752
 
     tool_main_type_byte = 15
     tool_main_types = {
@@ -62,6 +68,7 @@ class NDIToolDefinition:
         12: "GPIO Device",
         14: "Scan Reference",
     }
+    default_main_type = 4
 
     tool_sub_type_byte = 12
     tool_sub_types = {
@@ -69,6 +76,7 @@ class NDIToolDefinition:
         1: "Fixed Tip",
         2: "Undefined",
     }
+    default_sub_type = 2
 
     marker_type_byte = 655
     marker_types = {
@@ -76,6 +84,7 @@ class NDIToolDefinition:
         49: "Passive Disc",
         57: "Radix Lens",
     }
+    default_marker_type = 41
 
     tool_revision_bytes = slice(16,18)
     sequence_number_byte = 20
@@ -90,7 +99,7 @@ class NDIToolDefinition:
         self.markers = markers
 
     def to_standard(self):
-        return tool_converter.ToolDefinition(self.part_number, self.markers, self.pivot)
+        return tool_converter.ToolDefinition(self.part_number, self.markers, None)
     
     def _parse_timestamp(self, rom: bytes):
         # Years counted by twos starting from 1900
@@ -124,6 +133,30 @@ class NDIToolDefinition:
             running_sum += int(byte)
     
         return running_sum
+
+    def _parse_vec3f(self, data: bytes):
+        # struct format: little endian, 3 floats
+        data_format = "<3f"
+        stride = struct.calcsize(data_format)
+
+        assert(len(data) % stride == 0)
+
+        count = len(data) // stride
+        vectors = []
+
+        for i in range(count):
+            x, y, z = struct.unpack(data_format, data[i*stride:(i+1)*stride])
+            vectors.append(np.array([x, y, z], dtype=np.float32))
+
+        return vectors
+
+    def _write_vec3f(self, vectors):
+        data_format = "<3f"
+        data = []
+        for v in vectors:
+            data.extend(struct.pack(data_format, *v))
+
+        return bytes(data)
 
     def from_rom(self, rom: bytes):
         if len(rom) <= self.marker_data_start:
@@ -172,16 +205,51 @@ class NDIToolDefinition:
         if computed_checksum != checksum:
             print("Incorrect checksum! Should be {:d} but is {:d}".format(computed_checksum, checksum))
 
-        marker_count = int.from_bytes(rom[28:29], byteorder="little")
-        self.markers = []
+        marker_count = int(rom[self.marker_count_byte])
+        self.markers = self._parse_vec3f(rom[self.marker_data_start:marker_count*12+self.marker_data_start])
 
-        # struct format: little endian, 3 floats
-        marker_format = "<3f"
-        stride = struct.calcsize(marker_format)
+    def to_rom(self):
+        data = bytearray(self.ndi_rom_length)
 
-        for i in range(marker_count):
-            x, y, z = struct.unpack(marker_format, rom[i*stride:(i+1)*stride])
-            self.markers.append(np.array([x, y, z], dtype=np.float32))
+        data[0:3] = "NDI".encode("utf-8")
+        data[self.marker_type_byte] = self.default_marker_type
+        data[self.tool_main_type_byte] = self.default_main_type
+        data[self.tool_sub_type_byte] = self.default_sub_type
+        data[self.part_number_bytes] = self.part_number.to_bytes(2, byteorder='little')
+        data[self.marker_count_byte] = len(self.markers)
+        data[self.minimum_markers_byte] = 3
+        marker_data = self._write_vec3f(self.markers)
+        data[self.marker_data_start:self.marker_data_start+len(marker_data)] = marker_data
 
-        self.pivot = np.array([0.0, 0.0, 0.0])
+        # Unknown data
+        data[8] = 1
+        data[39] = 64
+        data[552] = 0
+        data[553] = 1
+        data[554] = 2
+        data[572:576] = [31, 31, 31, 31]
+        data[612] = 9
+        data[653] = 128
+        data[655] = 41
+
+        # Timestamp
+        data[21:24] = [40, 51, 61]
+
+        data[self.minimum_marker_angle_byte] = 90 # Degrees
+
+        # Assign all markers to face 1
+        # Assign marker normals
+        for i in range(len(self.markers)):
+            data[613+i] = 1
+            data[633+i] = 1
+            data[312+12*i:312+12*(i+1)] = struct.pack("<3f", 0, 0, 1)
+
+        data[656:656+12] = struct.pack("<3f", 0, 0, 1)
+
+        checksum = self._compute_checksum(data[6:])
+        checksum_length = len(data[self.checksum_bytes])
+        data[self.checksum_bytes] = checksum.to_bytes(checksum_length, byteorder='little')
+
+        return data
+
 
