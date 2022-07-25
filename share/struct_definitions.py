@@ -179,14 +179,13 @@ class Constant(FieldType):
         return self.length
 
     def default(self):
-        return value
+        return self.value
 
     def decode(self, data: bytearray):
         return [int(byte) for byte in data]
 
     def encode(self, value) -> bytearray:
         return bytearray(self.value)
-
 
 
 class String(FieldType):

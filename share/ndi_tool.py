@@ -108,7 +108,7 @@ class SequenceAndDate(Struct):
 
     def pre_encode(self):
         year = self.date.year
-        months = self.date.month - 1 # Zero-indexed
+        months = self.date.month - 1  # Zero-indexed
         year_start = datetime.date(year, 1, 1)
         days = (self.date - year_start).days
 

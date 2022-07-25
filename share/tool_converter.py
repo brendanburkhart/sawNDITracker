@@ -80,4 +80,3 @@ if __name__ == "__main__":
     with open(args.output, "wb") as f:
         data = ndi_tool.NDIROM.encode(tool)
         f.write(data)
-
