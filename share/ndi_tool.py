@@ -15,6 +15,9 @@ http://www.cisst.org/cisst/license.txt.
 
 import datetime
 
+import numpy as np
+
+import tool_converter
 from struct_definitions import (
     Array,
     Constant,
@@ -59,10 +62,11 @@ Byte range   Description                Field type        Comments
 ...
 36-39        minimum marker error       float32           [0.0, 10.0]
 ...
+69           unknown                    unknown           Constant 8?
+...
 72-311       marker geometry            xyz float32       Max of 20
 312-551      marker normals             xyz float32       Max of 20
-552-554      unknown                    unknown           Constant 0, 1, 2?
-...
+552-571      marker indices?            uint8             0, 1, 2, ...
 572-575      unknown                    unknown           Constant 31?
 576          unknown                    unknown           Constant 9?
 ...
@@ -85,6 +89,14 @@ class SequenceAndDate(Struct):
     days = Field("B")
     date_data = Field("B")
     even_years = Field("B")
+
+    @classmethod
+    def default(cls):
+        value = cls()
+        value.sequence_number = 0
+        value.date = datetime.date.today()
+
+        return value
 
     def post_decode(self):
         # Days are counted in 64-day blocks, rollovers are counted in lower three bits
@@ -142,7 +154,7 @@ marker_types = {(41, "Passive Sphere"), (49, "Passive Disc"), (57, "Radix Lens")
 
 
 class ROMHeader(Struct):
-    ndi = Field(String(3))
+    ndi = Field(String(3), "NDI")
     p1 = Field(Padding(1))
     checksum = Field(UInt16)
     p2 = Field(Constant([0, 0, 1, 0, 0, 0]))
@@ -159,19 +171,32 @@ class ROMHeader(Struct):
 
 
 class ROMGeometry(Struct):
-    minimum_marker_angle = Field(UInt8)
+    minimum_marker_angle = Field(UInt8, 90)
     p1 = Field(Padding(3))
     marker_count = Field(UInt8)
     p2 = Field(Padding(3))
-    minimum_marker_count = Field(UInt8)
+    minimum_marker_count = Field(UInt8, 3)
     p3 = Field(Padding(3))
-    minimum_marker_error = Field(Float32)
+    minimum_marker_error = Field(Float32, 2.0)
     p4 = Field(Padding(32))
     markers = Field(Array(Vector3f, 20))
     marker_normals = Field(Array(Vector3f, 20))
     p5 = Field(Constant([0, 1, 2]))
     p6 = Field(Padding(17))
     p7 = Field(Constant([31, 31, 31, 31, 9, 0, 0, 0]))
+
+    def pre_encode(self):
+        self.marker_count = len(self.markers)
+        if len(self.marker_normals) == 0:
+            self.marker_normals = np.empty((0, 3), dtype=np.float32)
+            normal = np.array([[0.0, 0.0, 1.0]])
+            for i in range(self.marker_count):
+                self.marker_normals = np.append(self.marker_normals, normal, axis=0)
+
+    def post_decode(self):
+        self.markers = np.around(self.markers, decimals=5)
+        self.markers = self.markers[0:self.marker_count]
+        self.marker_normals = self.marker_normals[0:self.marker_count]
 
 
 class ROMToolDetails(Struct):
@@ -197,8 +222,25 @@ class NDIROM(Struct):
 
     # Use post-processing hook to overwrite placeholder checksum
     def post_encode(self, data: bytearray) -> bytearray:
+        header_offset, _ = self.locate("header")
         offset, size = self.header.locate("checksum")
+        offset += header_offset
         checksum = sum(data[offset + size :])
         data[offset : offset + size] = self.header.update("checksum", checksum)
 
         return data
+
+    @staticmethod
+    def from_saw(tool_id: int, fiducials):
+        tool_definition = NDIROM()
+        tool_definition.header.date = datetime.date.today()
+        tool_definition.geometry.markers = fiducials
+
+        return tool_definition
+
+    def to_saw(self):
+        tool_id = self.tool_details.part_number
+        markers = self.geometry.markers
+        return tool_converter.SAWToolDefinition(tool_id, markers)
+
+

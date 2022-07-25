@@ -51,7 +51,7 @@ class ByteStruct(FieldType):
         return self.format.size
 
     def default(self):
-        return 0
+        return int(0)
 
     def decode(self, data: bytearray):
         return self.format.unpack(data)[0]
@@ -85,9 +85,10 @@ class Field:
     # static counter to order Fields by creation order
     id = 0
 
-    def __init__(self, field_type: Union[FieldType, Type[FieldType], str]):
+    def __init__(self, field_type: Union[FieldType, Type[FieldType], str], default=None):
         self.type = make_field_type(field_type)
         self._size = self.type.size()
+        self._default = default
 
         self.id = Field.id
         Field.id += 1
@@ -96,7 +97,7 @@ class Field:
         return self._size
 
     def default(self):
-        return self.type.default()
+        return self._default if self._default is not None else self.type.default()
 
     def decode(self, data: bytearray) -> Tuple[Any, bytearray]:
         if len(data) < self.size():
@@ -203,12 +204,20 @@ class String(FieldType):
         return self.length
 
     def default(self):
-        return "".join(["\0" for i in range(self.length)])
+        return ""
 
     def decode(self, data: bytearray) -> str:
         return data.decode("ascii")
 
     def encode(self, value: str) -> bytearray:
+        if len(value) > self.length:
+            message = "String '{}' is too long, max length is {}".format(value, self.length)
+            raise ValueError(message)
+
+        padding = self.length - len(value)
+        for i in range(padding):
+            value += "\0"
+
         return bytearray(value.encode("ascii"))
 
 
@@ -224,8 +233,14 @@ class Array(FieldType):
         return self.length * self.element_type.size()
 
     def default(self):
-        default_element = self.element_type.default()
-        return np.array([default_element for i in range(self.length)])
+        default_value = self.element_type.default()
+        try:
+            shape = (0, len(default_value))
+        except TypeError:
+            shape = (0,)
+
+        default_type = np.dtype(type(default_value))
+        return np.empty(shape, dtype=default_type)
 
     def decode(self, data: bytearray) -> npt.ArrayLike:
         step = self.element_type.size()
@@ -238,6 +253,14 @@ class Array(FieldType):
         return np.array(elements)
 
     def encode(self, value: npt.ArrayLike) -> bytearray:
+        if len(value) > self.length:
+            raise ValueError("Array too large!")
+ 
+        padding = self.length - len(value)
+        for i in range(padding):
+            v = np.array([self.element_type.default()])
+            value = np.append(value, v, axis=0)
+
         data = bytearray([])
 
         for v in value:
@@ -408,7 +431,7 @@ class MetaStruct(type):
         new_attrs["decode"] = classmethod(metaclass._make_decode())
         new_attrs["encode"] = classmethod(metaclass._make_encode())
         new_attrs["size"] = classmethod(metaclass._make_size())
-        new_attrs["default"] = classmethod(metaclass._make_default())
+        new_attrs["_default"] = classmethod(metaclass._make_default())
         new_attrs["locate"] = classmethod(metaclass._make_locate())
         new_attrs["update"] = metaclass._make_update()
 
@@ -427,9 +450,14 @@ class Struct(metaclass=MetaStruct):
     # Initialize instance storage, fill with None
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls, *args, **kwargs)
-        instance._field_data = {key: None for key, value in cls._fields.items()}
+        instance._field_data = {key: value.default() for key, value in cls._fields.items()}
 
         return instance
+
+    # Override to provide custom default
+    @classmethod
+    def default(cls):
+        return cls._default()
 
     # Hook to perform pre-encode processing
     def pre_encode(self):
