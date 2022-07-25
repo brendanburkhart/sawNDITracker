@@ -19,7 +19,7 @@ http://www.cisst.org/cisst/license.txt.
 import inspect
 import math
 import struct
-from typing import Any, List, Tuple, Type
+from typing import Any, List, Tuple, Type, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -60,7 +60,7 @@ class ByteStruct(FieldType):
         return self.format.pack(value)
 
 
-def make_field_type(format: FieldType | Type[FieldType] | str) -> FieldType:
+def make_field_type(format: Union[FieldType, Type[FieldType], str]) -> FieldType:
     if isinstance(format, FieldType):
         return format
     elif inspect.isclass(format) and issubclass(format, FieldType):
@@ -85,7 +85,7 @@ class Field:
     # static counter to order Fields by creation order
     id = 0
 
-    def __init__(self, field_type: FieldType | Type[FieldType] | str):
+    def __init__(self, field_type: Union[FieldType, Type[FieldType], str]):
         self.type = make_field_type(field_type)
         self._size = self.type.size()
 
@@ -95,18 +95,21 @@ class Field:
     def size(self):
         return self._size
 
+    def default(self):
+        return self.type.default()
+
     def decode(self, data: bytearray) -> Tuple[Any, bytearray]:
-        if len(data) < self.size:
+        if len(data) < self.size():
             raise ValueError("Not enough bytes to complete parsing!")
 
-        remaining_data = data[self.size :]
+        remaining_data = data[self.size() :]
 
-        value = self.type.decode(data[0 : self.size])
+        value = self.type.decode(data[0 : self.size()])
         return value, remaining_data
 
     def encode(self, value: Any, data: bytearray) -> bytearray:
         encoding = self.type.encode(value)
-        assert len(encoding) == self.size
+        assert len(encoding) == self.size()
         data.extend(encoding)
 
         return data
@@ -131,18 +134,59 @@ class Vector3f(FieldType):
         return np.array([*values])
 
     def encode(self, value: npt.ArrayLike) -> bytearray:
-        data = bytearray([])
-
-        for v in value:
-            data.extend(format.pack(v))
-
-        return data
+        return self.format.pack(*value)
 
 
-UInt8 = "<B"
-UInt16 = "<H"
-Float32 = "<f"
-Padding = lambda length: "<{}B".format(length)  # Fixed-size padding
+UInt8 = "B"
+UInt16 = "H"
+Float32 = "f"
+
+
+class Padding(FieldType):
+    """
+    Fixed-length zero-padding
+    """
+
+    def __init__(self, length: int):
+        super().__init__()
+        self.format = struct.Struct("<{}B".format(length))
+        self.length = length
+
+    def size(self):
+        return self.format.size
+
+    def default(self):
+        return [0 for i in range(self.length)]
+
+    def decode(self, data: bytearray):
+        return 0
+
+    def encode(self, value) -> bytearray:
+        return self.format.pack(*self.default())
+
+
+class Constant(FieldType):
+    """
+    Constant bytes
+    """
+
+    def __init__(self, value: List[int]):
+        super().__init__()
+        self.value = value
+        self.length = len(value)
+
+    def size(self):
+        return self.length
+
+    def default(self):
+        return value
+
+    def decode(self, data: bytearray):
+        return [int(byte) for byte in data]
+
+    def encode(self, value) -> bytearray:
+        return bytearray(self.value)
+
 
 
 class String(FieldType):
@@ -190,7 +234,7 @@ class Array(FieldType):
 
         for i in range(self.length):
             element_data = data[i * step : (i + 1) * step]
-            elements.append(self.element_type.parse(element_data))
+            elements.append(self.element_type.decode(element_data))
 
         return np.array(elements)
 
@@ -267,22 +311,22 @@ class MetaStruct(type):
     @staticmethod
     def _make_field_property(key):
         def get(self):
-            return self._field_data[key].value
+            return self._field_data[key]
 
         def set(self, value):
-            self._field_data[key].value = value
+            self._field_data[key] = value
 
         return property(get, set)
 
     @staticmethod
     def _make_decode():
-        def decode(self, data: bytearray):
+        def decode(cls, data: bytearray):
             # Parse fields in order of definition
-            keys = sorted(self._fields, key=lambda k: self._fields[k].id)
-            struct_value = self.default()
+            keys = sorted(cls._fields, key=lambda k: cls._fields[k].id)
+            struct_value = cls.default()
 
             for key in keys:
-                value, data = self._fields[key].decode(data)
+                value, data = cls._fields[key].decode(data)
                 struct_value._field_data[key] = value
 
             # Post-processing
@@ -294,53 +338,54 @@ class MetaStruct(type):
 
     @staticmethod
     def _make_encode():
-        def encode(self) -> bytearray:
+        def encode(cls, struct_value) -> bytearray:
             # Parse fields in order of definition
-            keys = sorted(self._fields, key=lambda k: self._fields[k].id)
+            keys = sorted(cls._fields, key=lambda k: cls._fields[k].id)
             data = bytearray([])
 
             # Pre-precessing hook
-            self.pre_encode()
+            struct_value.pre_encode()
 
             for key in keys:
-                value = self._fields_data[key] or self._fields[key].default()
-                data = self._fields[key].encode(value, data)
+                value = struct_value._field_data[key]
+                value = value if value is not None else cls._fields[key].default()
+                data = cls._fields[key].encode(value, data)
 
             # Post-processing hook
-            data = self.post_encode(data)
+            data = struct_value.post_encode(data)
             return data
 
         return encode
 
     @staticmethod
     def _make_default():
-        def default(self):
-            return self.__class__()
+        def default(cls):
+            return cls()
 
         return default
 
     @staticmethod
     def _make_size():
-        def size(self):
-            return sum([field.size() for key, field in self._fields.items()])
+        def size(cls):
+            return sum([field.size() for key, field in cls._fields.items()])
 
         return size
 
     @staticmethod
     def _make_locate():
-        def locate(self, key: str):
+        def locate(cls, key: str):
             # Parse fields in order of definition
-            all_keys = sorted(self._fields, key=lambda k: self._fields[k].id)
+            all_keys = sorted(cls._fields, key=lambda k: cls._fields[k].id)
             preceeding_keys = all_keys[0 : all_keys.index(key)]
-            offset = sum([self._fields[key].size() for key in preceeding_keys])
-            return offset, self._fields[key].size()
+            offset = sum([cls._fields[key].size() for key in preceeding_keys])
+            return offset, cls._fields[key].size()
 
         return locate
 
     @staticmethod
     def _make_update():
         def update(self, key: str, value):
-            self._fields_data[key] = value
+            self._field_data[key] = value
             return self._fields[key].encode(value, bytearray([]))
 
         return update
@@ -361,11 +406,11 @@ class MetaStruct(type):
                 new_attrs[key] = value
 
         new_attrs["_fields"] = fields
-        new_attrs["decode"] = metaclass._make_decode()
-        new_attrs["encode"] = metaclass._make_encode()
-        new_attrs["size"] = metaclass._make_size()
-        new_attrs["default"] = metaclass._make_default()
-        new_attrs["locate"] = metaclass._make_locate()
+        new_attrs["decode"] = classmethod(metaclass._make_decode())
+        new_attrs["encode"] = classmethod(metaclass._make_encode())
+        new_attrs["size"] = classmethod(metaclass._make_size())
+        new_attrs["default"] = classmethod(metaclass._make_default())
+        new_attrs["locate"] = classmethod(metaclass._make_locate())
         new_attrs["update"] = metaclass._make_update()
 
         return super().__new__(metaclass, name, bases, new_attrs)

@@ -71,14 +71,13 @@ if __name__ == "__main__":
 
     with open(args.input, "rb") as f:
         if input_extension == ".rom":
-            tool = ndi_tool.NDIToolDefinition()
             data = f.read()
-            tool.from_rom(data)
+            tool = ndi_tool.NDIROM.decode(data)
 
-        std_tool = tool.to_standard()
+    print(tool.header.date)
+    print(tool.geometry.markers)
 
     with open(args.output, "wb") as f:
-        data = tool.to_rom()
+        data = ndi_tool.NDIROM.encode(tool)
         f.write(data)
 
-    print(std_tool.to_json())

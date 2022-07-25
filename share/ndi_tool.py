@@ -17,6 +17,7 @@ import datetime
 
 from struct_definitions import (
     Array,
+    Constant,
     Enum,
     Field,
     Float32,
@@ -89,7 +90,7 @@ class SequenceAndDate(Struct):
         # Days are counted in 64-day blocks, rollovers are counted in lower three bits
         # of next field. middle 4 bits count months, upper bit is set when in odd year
         # Day count incremented by 4 per day - lower two bits used for sequence number
-        days = (self.date_data % 8) << 6 + self.days >> 2
+        days = ((self.date_data % 8) << 6) + (self.days >> 2)
 
         # Years counted by twos starting from 1900
         year_parity = self.date_data >> 7
@@ -107,9 +108,9 @@ class SequenceAndDate(Struct):
 
     def pre_encode(self):
         year = self.date.year
-        months = self.date.year
+        months = self.date.month - 1 # Zero-indexed
         year_start = datetime.date(year, 1, 1)
-        days = (self.year - year_start).days
+        days = (self.date - year_start).days
 
         year_parity = year % 2
 
@@ -144,7 +145,7 @@ class ROMHeader(Struct):
     ndi = Field(String(3))
     p1 = Field(Padding(1))
     checksum = Field(UInt16)
-    p2 = Field(Padding(6))
+    p2 = Field(Constant([0, 0, 1, 0, 0, 0]))
     tool_sub_type = Field(Enum(tool_sub_types, 2))
     p3 = Field(Padding(2))
     tool_main_type = Field(Enum(tool_main_types, 0))
@@ -157,7 +158,7 @@ class ROMHeader(Struct):
     date = passthrough_property(["sequence_and_date", "date"])
 
 
-class ROMGeomtry(Struct):
+class ROMGeometry(Struct):
     minimum_marker_angle = Field(UInt8)
     p1 = Field(Padding(3))
     marker_count = Field(UInt8)
@@ -168,26 +169,29 @@ class ROMGeomtry(Struct):
     p4 = Field(Padding(32))
     markers = Field(Array(Vector3f, 20))
     marker_normals = Field(Array(Vector3f, 20))
-    p5 = Field(Padding(28))
+    p5 = Field(Constant([0, 1, 2]))
+    p6 = Field(Padding(17))
+    p7 = Field(Constant([31, 31, 31, 31, 9, 0, 0, 0]))
 
 
 class ROMToolDetails(Struct):
     tool_manufacturer = Field(String(12))
     part_number = Field(UInt16)
-    p1 = Field(Padding(19))
+    p1 = Field(Padding(18))
+    p2 = Field(Constant([9]))
 
 
 class ROMFaceGeometry(Struct):
-    face_assignments = Field(Array(UInt8, 20))
+    marker_faces = Field(Array(UInt8, 20))
     other_assignments = Field(Array(UInt8, 20))
-    p1 = Field(Padding(2))
+    p1 = Field(Constant([128, 0]))
     marker_type = Field(Enum(marker_types, 41))
-    marker_normals = Field(Array(Vector3f, 8))
+    face_normals = Field(Array(Vector3f, 8))
 
 
 class NDIROM(Struct):
     header = Field(ROMHeader)
-    geometry = Field(ROMGeomtry)
+    geometry = Field(ROMGeometry)
     tool_details = Field(ROMToolDetails)
     face_geometry = Field(ROMFaceGeometry)
 
