@@ -1,6 +1,24 @@
+"""
+Author: Brendan Burkhart
+Created on: 2022-7-22
+
+(C) Copyright 2022 Johns Hopkins University (JHU), All Rights Reserved.
+
+--- begin cisst license - do not edit ---
+
+This software is provided "as is" under an open source license, with
+no warranty.  The complete license can be found in license.txt and
+http://www.cisst.org/cisst/license.txt.
+
+--- end cisst license ---
+"""
+
 import argparse
-import ndi_tool
 import pathlib
+
+import numpy as np
+
+import ndi_tool
 
 
 class ToolDefinition:
@@ -31,7 +49,7 @@ class ToolDefinition:
             "count": len(self.markers),
             "fiducials": fiducials,
         }
-    
+
         if self.id is not None:
             json["id"] = self.id
 
@@ -64,4 +82,3 @@ if __name__ == "__main__":
         f.write(data)
 
     print(std_tool.to_json())
-
