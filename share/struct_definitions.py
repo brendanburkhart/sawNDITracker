@@ -85,7 +85,9 @@ class Field:
     # static counter to order Fields by creation order
     id = 0
 
-    def __init__(self, field_type: Union[FieldType, Type[FieldType], str], default=None):
+    def __init__(
+        self, field_type: Union[FieldType, Type[FieldType], str], default=None
+    ):
         self.type = make_field_type(field_type)
         self._size = self.type.size()
         self._default = default
@@ -211,7 +213,9 @@ class String(FieldType):
 
     def encode(self, value: str) -> bytearray:
         if len(value) > self.length:
-            message = "String '{}' is too long, max length is {}".format(value, self.length)
+            message = "String '{}' is too long, max length is {}".format(
+                value, self.length
+            )
             raise ValueError(message)
 
         padding = self.length - len(value)
@@ -255,7 +259,7 @@ class Array(FieldType):
     def encode(self, value: npt.ArrayLike) -> bytearray:
         if len(value) > self.length:
             raise ValueError("Array too large!")
- 
+
         padding = self.length - len(value)
         for i in range(padding):
             v = np.array([self.element_type.default()])
@@ -450,7 +454,9 @@ class Struct(metaclass=MetaStruct):
     # Initialize instance storage, fill with None
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls, *args, **kwargs)
-        instance._field_data = {key: value.default() for key, value in cls._fields.items()}
+        instance._field_data = {
+            key: value.default() for key, value in cls._fields.items()
+        }
 
         return instance
 

@@ -51,7 +51,7 @@ class SAWToolDefinition:
 
         if self.id is not None:
             json_dict["id"] = int(self.id)
- 
+
         json_dict["count"] = len(self.markers)
         json_dict["fiducials"] = [array_to_point(m) for m in self.markers]
 
@@ -64,26 +64,30 @@ class SAWToolDefinition:
 def read_rom(file_name):
     with open(file_name, "rb") as f:
         data = f.read()
-        tool = ndi_tool.NDIROM.decode(data)
+        tool = ndi_tool.NDIToolDefinition.decode(data)
 
     return tool.to_saw()
 
+
 def write_rom(tool, file_name):
-    tool = ndi_tool.NDIROM.from_saw(tool.id, tool.markers)
-    
+    tool = ndi_tool.NDIToolDefinition.from_saw(tool.id, tool.markers)
+
     with open(file_name, "wb") as f:
-        data = ndi_tool.NDIROM.encode(tool)
+        data = ndi_tool.NDIToolDefinition.encode(tool)
         f.write(data)
+
 
 def read_saw(file_name):
     with open(file_name, "r") as f:
         json_dict = json.load(f)
         return SAWToolDefinition.from_json(json_dict)
 
+
 def write_saw(tool, file_name):
     json_dict = tool.to_json()
     with open(file_name, "w") as f:
         json.dump(json_dict, f, indent=4)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -102,7 +106,9 @@ if __name__ == "__main__":
     elif input_extension == ".ini":
         raise NotImplemented()
     else:
-        raise ValueError("Only NDI .rom, Atracsys .ini, and SAW .json formats are supported!")
+        raise ValueError(
+            "Only NDI .rom, Atracsys .ini, and SAW .json formats are supported!"
+        )
 
     if output_extension == ".rom":
         write_rom(tool, args.output)
@@ -111,5 +117,6 @@ if __name__ == "__main__":
     elif output_extension == ".ini":
         raise NotImplemented()
     else:
-        raise ValueError("Only NDI .rom, Atracsys .ini, and SAW .json formats are supported!")
-
+        raise ValueError(
+            "Only NDI .rom, Atracsys .ini, and SAW .json formats are supported!"
+        )

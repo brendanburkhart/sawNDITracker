@@ -195,8 +195,8 @@ class ROMGeometry(Struct):
 
     def post_decode(self):
         self.markers = np.around(self.markers, decimals=5)
-        self.markers = self.markers[0:self.marker_count]
-        self.marker_normals = self.marker_normals[0:self.marker_count]
+        self.markers = self.markers[0 : self.marker_count]
+        self.marker_normals = self.marker_normals[0 : self.marker_count]
 
 
 class ROMToolDetails(Struct):
@@ -214,7 +214,7 @@ class ROMFaceGeometry(Struct):
     face_normals = Field(Array(Vector3f, 8))
 
 
-class NDIROM(Struct):
+class NDIToolDefinition(Struct):
     header = Field(ROMHeader)
     geometry = Field(ROMGeometry)
     tool_details = Field(ROMToolDetails)
@@ -232,7 +232,7 @@ class NDIROM(Struct):
 
     @staticmethod
     def from_saw(tool_id: int, fiducials):
-        tool_definition = NDIROM()
+        tool_definition = NDIToolDefinition()
         tool_definition.header.date = datetime.date.today()
         tool_definition.geometry.markers = fiducials
 
@@ -242,5 +242,3 @@ class NDIROM(Struct):
         tool_id = self.tool_details.part_number
         markers = self.geometry.markers
         return tool_converter.SAWToolDefinition(tool_id, markers)
-
-
