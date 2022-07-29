@@ -209,6 +209,7 @@ class String(FieldType):
         return ""
 
     def decode(self, data: bytearray) -> str:
+        data = bytearray([byte for byte in data if byte != 0])
         return data.decode("ascii")
 
     def encode(self, value: str) -> bytearray:

@@ -66,7 +66,7 @@ def read_rom(file_name):
         data = f.read()
         tool = ndi_tool.NDIToolDefinition.decode(data)
 
-    return tool.to_saw()
+    return tool
 
 
 def write_rom(tool, file_name):
@@ -100,7 +100,8 @@ if __name__ == "__main__":
     output_extension = pathlib.Path(args.output).suffix
 
     if input_extension == ".rom":
-        tool = read_rom(args.input)
+        ndi_tool_definition = read_rom(args.input)
+        tool = ndi_tool_definition.to_saw()
     elif input_extension == ".json":
         tool = read_saw(args.input)
     elif input_extension == ".ini":
@@ -110,7 +111,9 @@ if __name__ == "__main__":
             "Only NDI .rom, Atracsys .ini, and SAW .json formats are supported!"
         )
 
-    if output_extension == ".rom":
+    if args.output == "":
+        print(json.dumps(ndi_tool_definition.to_dict(), indent=4, default=str))
+    elif output_extension == ".rom":
         write_rom(tool, args.output)
     elif output_extension == ".json":
         write_saw(tool, args.output)

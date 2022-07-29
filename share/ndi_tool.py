@@ -213,6 +213,9 @@ class ROMFaceGeometry(Struct):
     marker_type = Field(Enum(marker_types, 41))
     face_normals = Field(Array(Vector3f, 8))
 
+    def post_decode(self):
+        self.marker_faces = np.array([f for f in self.marker_faces if f != 0])
+
 
 class NDIToolDefinition(Struct):
     header = Field(ROMHeader)
@@ -229,6 +232,29 @@ class NDIToolDefinition(Struct):
         data[offset : offset + size] = self.header.update("checksum", checksum)
 
         return data
+
+    def to_dict(self):
+        return {
+            "date": self.header.date,
+            "tool_main_type": self.header.tool_main_type,
+            "tool_sub_type": self.header.tool_sub_type,
+            "tool_revision": self.header.tool_revision,
+            "sequence_number": self.header.sequence_number,
+            "tool_manufacturer": self.tool_details.tool_manufacturer,
+            "part_number": self.tool_details.part_number,
+            "marker_type": self.face_geometry.marker_type,
+            "marker_count": self.geometry.marker_count,
+            "minimum_marker_angle": self.geometry.minimum_marker_angle,
+            "minimum_marker_count": self.geometry.minimum_marker_count,
+            "minimum_marker_error": self.geometry.minimum_marker_error,
+            "markers": self.geometry.markers,
+            "marker_normals": self.geometry.marker_normals,
+            "marker_faces": self.face_geometry.marker_faces,
+            "face_normals": self.face_geometry.face_normals,
+        }
+
+    def __dir__(self):
+        return self.to_dict().keys()
 
     @staticmethod
     def from_saw(tool_id: int, fiducials):
