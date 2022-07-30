@@ -70,8 +70,8 @@ Byte range   Description                Field type        Comments
 572-575      unknown                    unknown           Constant 31?
 576          unknown                    unknown           Constant 9?
 ...
-580-591      tool manufacturer          ASCII literal     Max length 12 characters
-592-593      part number                uint16
+580-591      tool manufacturer          ASCII string      Max length 12 characters
+592-611      part number                ASCII string      Max length 20 characters
 ...
 612          unknown                    unknown           Constant 9?
 613-632      marker faces               uint8             Index of face assigned to each marker
@@ -201,9 +201,8 @@ class ROMGeometry(Struct):
 
 class ROMToolDetails(Struct):
     tool_manufacturer = Field(String(12))
-    part_number = Field(UInt16)
-    p1 = Field(Padding(18))
-    p2 = Field(Constant([9]))
+    part_number = Field(String(20))
+    p1 = Field(Constant([9]))
 
 
 class ROMFaceGeometry(Struct):
