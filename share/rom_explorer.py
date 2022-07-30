@@ -3,6 +3,7 @@ import numpy as np
 import struct
 import colorama
 from colorama import Fore, Back, Style
+
 colorama.init(strip=False)
 
 """
@@ -30,10 +31,11 @@ def color(string, values):
     else:
         return string
 
+
 def compare(roms):
     data = zip(*[list(r) for r in roms])
 
-    fmt = "'{: >1}' '{:>3d}' '{:>2x}'"
+    fmt = "'{: >1}' {:>3d} {:>2x}"
     fmt = "{:>4d}: " + ",    ".join([fmt for i in range(len(roms))])
 
     def b_to_string(b):
@@ -41,11 +43,12 @@ def compare(roms):
             return ""
 
         string = str(chr(b))
-        return string if string.isalnum() and string.isascii() else "" 
+        return string if string.isalnum() and string.isascii() else ""
 
     for i, b in enumerate(data):
         row = [x for j in range(len(b)) for x in [b_to_string(b[j]), b[j], b[j]]]
         print(color(fmt.format(i, *row), b))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -59,4 +62,3 @@ if __name__ == "__main__":
             roms.append(f.read())
 
     compare(roms)
-

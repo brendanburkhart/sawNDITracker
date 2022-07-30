@@ -264,6 +264,5 @@ class NDIToolDefinition(Struct):
         return tool_definition
 
     def to_saw(self):
-        tool_id = self.tool_details.part_number
         markers = self.geometry.markers
-        return tool_converter.SAWToolDefinition(tool_id, markers)
+        return tool_converter.SAWToolDefinition(None, markers)

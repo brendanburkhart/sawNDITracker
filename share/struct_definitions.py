@@ -60,20 +60,6 @@ class ByteStruct(FieldType):
         return self.format.pack(value)
 
 
-def make_field_type(format: Union[FieldType, Type[FieldType], str]) -> FieldType:
-    if isinstance(format, FieldType):
-        return format
-    elif inspect.isclass(format) and issubclass(format, FieldType):
-        return format()
-    elif isinstance(format, str):
-        return ByteStruct(format)
-    else:
-        raise TypeError(
-            "Field parser type must be a FieldType instance, "
-            "a FieldType subclass, or a struct format string"
-        )
-
-
 class Field:
     """
     Field is a single field in a Struct, with a specified field type.
@@ -85,10 +71,24 @@ class Field:
     # static counter to order Fields by creation order
     id = 0
 
+    def make_field_type(format: Union[FieldType, Type[FieldType], str]) -> FieldType:
+        if isinstance(format, FieldType):
+            return format
+        elif inspect.isclass(format) and issubclass(format, FieldType):
+            return format()
+        elif isinstance(format, str):
+            return ByteStruct(format)
+        else:
+            raise TypeError(
+                "Field parser type must be a FieldType instance, "
+                "a FieldType subclass, or a struct format string"
+            )
+
     def __init__(
         self, field_type: Union[FieldType, Type[FieldType], str], default=None
     ):
-        self.type = make_field_type(field_type)
+
+        self.type = Field.make_field_type(field_type)
         self._size = self.type.size()
         self._default = default
 
@@ -140,9 +140,9 @@ class Vector3f(FieldType):
         return self.format.pack(*value)
 
 
-UInt8 = "B"
-UInt16 = "H"
-Float32 = "f"
+UInt8 = ByteStruct("B")
+UInt16 = ByteStruct("H")
+Float32 = ByteStruct("f")
 
 
 class Padding(FieldType):
@@ -231,7 +231,7 @@ class Array(FieldType):
 
     def __init__(self, element_type, length: int):
         super().__init__()
-        self.element_type = make_field_type(element_type)
+        self.element_type = Field.make_field_type(element_type)
         self.length = length
 
     def size(self):
@@ -335,110 +335,20 @@ class MetaStruct(type):
     serialize/deserialize them from byte arrays.
     """
 
-    @staticmethod
-    def _make_field_property(key):
-        def get(self):
-            return self._field_data[key]
-
-        def set(self, value):
-            self._field_data[key] = value
-
-        return property(get, set)
-
-    @staticmethod
-    def _make_decode():
-        def decode(cls, data: bytearray):
-            # Parse fields in order of definition
-            keys = sorted(cls._fields, key=lambda k: cls._fields[k].id)
-            struct_value = cls.default()
-
-            for key in keys:
-                value, data = cls._fields[key].decode(data)
-                struct_value._field_data[key] = value
-
-            # Post-processing
-            struct_value.post_decode()
-
-            return struct_value
-
-        return decode
-
-    @staticmethod
-    def _make_encode():
-        def encode(cls, struct_value) -> bytearray:
-            # Parse fields in order of definition
-            keys = sorted(cls._fields, key=lambda k: cls._fields[k].id)
-            data = bytearray([])
-
-            # Pre-precessing hook
-            struct_value.pre_encode()
-
-            for key in keys:
-                value = struct_value._field_data[key]
-                value = value if value is not None else cls._fields[key].default()
-                data = cls._fields[key].encode(value, data)
-
-            # Post-processing hook
-            data = struct_value.post_encode(data)
-            return data
-
-        return encode
-
-    @staticmethod
-    def _make_default():
-        def default(cls):
-            return cls()
-
-        return default
-
-    @staticmethod
-    def _make_size():
-        def size(cls):
-            return sum([field.size() for key, field in cls._fields.items()])
-
-        return size
-
-    @staticmethod
-    def _make_locate():
-        def locate(cls, key: str):
-            # Parse fields in order of definition
-            all_keys = sorted(cls._fields, key=lambda k: cls._fields[k].id)
-            preceeding_keys = all_keys[0 : all_keys.index(key)]
-            offset = sum([cls._fields[key].size() for key in preceeding_keys])
-            return offset, cls._fields[key].size()
-
-        return locate
-
-    @staticmethod
-    def _make_update():
-        def update(self, key: str, value):
-            self._field_data[key] = value
-            return self._fields[key].encode(value, bytearray([]))
-
-        return update
-
     def __new__(metaclass, name, bases, attrs):
         bases = (*bases, FieldType)
         new_attrs = {}
 
-        # Store all Fields
+        # Store all Fields so they can be accessed later
         fields = {}
 
         for key, value in attrs.items():
             if isinstance(value, Field):
-                # Transform Field attributes into a @property
                 fields[key] = value
-                new_attrs[key] = metaclass._make_field_property(key)
             else:
                 new_attrs[key] = value
 
         new_attrs["_fields"] = fields
-        new_attrs["decode"] = classmethod(metaclass._make_decode())
-        new_attrs["encode"] = classmethod(metaclass._make_encode())
-        new_attrs["size"] = classmethod(metaclass._make_size())
-        new_attrs["_default"] = classmethod(metaclass._make_default())
-        new_attrs["locate"] = classmethod(metaclass._make_locate())
-        new_attrs["update"] = metaclass._make_update()
 
         return super().__new__(metaclass, name, bases, new_attrs)
 
@@ -455,16 +365,64 @@ class Struct(metaclass=MetaStruct):
     # Initialize instance storage, fill with None
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls, *args, **kwargs)
-        instance._field_data = {
-            key: value.default() for key, value in cls._fields.items()
-        }
+        for key, field in cls._fields.items():
+            setattr(instance, key, field.default())
 
         return instance
 
-    # Override to provide custom default
+    # Provides default-constructed value
+    # Override to provide custom default value
     @classmethod
     def default(cls):
-        return cls._default()
+        return cls()
+
+    @classmethod
+    def size(cls):
+        return sum([field.size() for key, field in cls._fields.items()])
+
+    @classmethod
+    def locate(cls, key: str):
+        # Parse fields in order of definition
+        all_keys = sorted(cls._fields, key=lambda k: cls._fields[k].id)
+        preceeding_keys = all_keys[0 : all_keys.index(key)]
+        offset = sum([cls._fields[key].size() for key in preceeding_keys])
+        return offset, cls._fields[key].size()
+
+    @classmethod
+    def decode(cls, data: bytearray):
+        # Parse fields in order of definition
+        keys = sorted(cls._fields, key=lambda k: cls._fields[k].id)
+        self = cls.default()
+
+        for key in keys:
+            value, data = cls._fields[key].decode(data)
+            setattr(self, key, value)
+
+        # Post-processing
+        self.post_decode()
+
+        return self
+
+    @classmethod
+    def encode(cls, self) -> bytearray:
+        # Parse fields in order of definition
+        keys = sorted(self._fields, key=lambda k: self._fields[k].id)
+        data = bytearray([])
+
+        # Pre-precessing hook
+        self.pre_encode()
+
+        for key in keys:
+            value = getattr(self, key)
+            data = self._fields[key].encode(value, data)
+
+        # Post-processing hook
+        data = self.post_encode(data)
+        return data
+
+    def update(self, key: str, value) -> bytearray:
+        setattr(self, key, value)
+        return self._fields[key].encode(value, bytearray([]))
 
     # Hook to perform pre-encode processing
     def pre_encode(self):
