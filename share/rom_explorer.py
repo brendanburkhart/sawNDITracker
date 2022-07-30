@@ -41,7 +41,7 @@ def compare(roms):
             return ""
 
         string = str(chr(b))
-        return string if string.isprintable() else "" 
+        return string if string.isalnum() and string.isascii() else "" 
 
     for i, b in enumerate(data):
         row = [x for j in range(len(b)) for x in [b_to_string(b[j]), b[j], b[j]]]
