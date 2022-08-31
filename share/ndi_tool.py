@@ -63,8 +63,8 @@ Byte range   Description                Field type        Comments
 36-39        maximum marker error       float32           Maximum tracking error in mm, valid range [0.0, 10.0], default 2.0
 40-51        minimum spread 1, 2, 3     float32           Default is 0.0
 ...
-64-67        unknwon                    float32?          2.5 for older Polaris, 0.0 for new?
-68-69        unknown                    uint16?           0 for older Polaris, 8 for new?
+64-67        unknwon                    float32?          2.5 for older Polaris, 0.0 for new, but either seems to work for both
+68-69        unknown                    uint16?           0 for older Polaris, 8 for new, but either seems to work for both
 ...
 72-311       marker geometry            xyz float32       Max of 20
 312-551      marker normals             xyz float32       Max of 20
@@ -75,7 +75,7 @@ Byte range   Description                Field type        Comments
 577-579      switch 1, 2, 3             bool              0 is none, 1 is present, default none
 580-591      tool manufacturer          ASCII string      Max length 12 characters
 592-611      part number                ASCII string      Max length 20 characters
-612          unknown                    unknown           Constant 9 or 17?
+612          unknown                    unknown           17 for older Polaris, 9 for new, but either seems to work for both
 613-632      marker faces               uint8             Index of face assigned to each marker
 633-652      marker groups              uint8             Index of group assigned to each marker, default is 1
 653          enhanced algorithm flags   uint8             Bit 7 is "unique geometry", bit 2 is "three-marker locking" for active tools
@@ -194,9 +194,6 @@ class ROMGeometry(Struct):
         self.firing_sequence = np.arange(0, self.marker_count)
         if len(self.marker_normals) == 0:
             self.marker_normals = np.empty((0, 3), dtype=np.float32)
-            normal = np.array([[0.0, 0.0, 1.0]])
-            for i in range(self.marker_count):
-                self.marker_normals = np.append(self.marker_normals, normal, axis=0)
 
     def post_decode(self):
         self.markers = np.around(self.markers, decimals=5)
@@ -211,15 +208,25 @@ class ROMToolDetails(Struct):
 
 
 class ROMFaceGeometry(Struct):
+    marker_count = 0
+
     marker_faces = Field(Array(UInt8, 20))
-    other_assignments = Field(Array(UInt8, 20))
+    marker_groups = Field(Array(UInt8, 20))
     alg_flags = Field(Constant([128]))
     p1 = Field(Padding(1))
     marker_type = Field(Enum(marker_types, 41))
     face_normals = Field(Array(Vector3f, 8))
 
+    def pre_encode(self):
+        if len(self.marker_faces) == 0:
+            self.marker_faces = [1 for _ in range(self.marker_count)]
+
+        if len(self.marker_groups) == 0:
+            self.marker_groups = [1 for _ in range(self.marker_count)]
+
     def post_decode(self):
         self.marker_faces = np.array([f for f in self.marker_faces if f != 0])
+        self.marker_groups = np.array([g for g in self.marker_groups if g != 0])
 
 
 class NDIToolDefinition(Struct):
@@ -227,6 +234,9 @@ class NDIToolDefinition(Struct):
     geometry = Field(ROMGeometry)
     tool_details = Field(ROMToolDetails)
     face_geometry = Field(ROMFaceGeometry)
+
+    def pre_encode(self):
+        self.face_geometry.marker_count = len(self.geometry.markers)
 
     # Use post-processing hook to overwrite placeholder checksum
     def post_encode(self, data: bytearray) -> bytearray:
