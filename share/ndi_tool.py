@@ -40,7 +40,7 @@ All multi-byte fields are little endian
 Total file length is 752 bytes, seems to be fixed-length format
 
 Byte range   Description                Field type        Comments
----------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
 0-2          "NDI"                      ASCII literal
 ...
 4-5          checksum                   uint16            Sum of all later bytes
@@ -54,29 +54,32 @@ Byte range   Description                Field type        Comments
 ...
 20           sequence number            uint10            Default 1, also lower two bits of byte 21
 21-23        timestamp                  ---               See SequenceAndDate for details
-24           minimum marker angle       uint8             Degrees, [0, 180], default 90
+24           maximum marker angle       uint8             Degrees, [0, 180], default 90
 ...
-28           marker count               uint8             [3, 20]
+28           marker count               uint8             Valid range [3, 20]
 ...
-32           minimum markers            uint8             [3, 20], <= marker count
+32           minimum markers            uint8             Valid range [3, 20], <= marker count
 ...
-36-39        minimum marker error       float32           [0.0, 10.0]
+36-39        maximum marker error       float32           Maximum tracking error in mm, valid range [0.0, 10.0], default 2.0
+40-51        minimum spread 1, 2, 3     float32           Default is 0.0
 ...
-69           unknown                    unknown           Constant 8?
+64-67        unknwon                    float32?          2.5 for older Polaris, 0.0 for new?
+68-69        unknown                    uint16?           0 for older Polaris, 8 for new?
 ...
 72-311       marker geometry            xyz float32       Max of 20
 312-551      marker normals             xyz float32       Max of 20
-552-571      marker indices?            uint8             0, 1, 2, ...
-572-575      unknown                    unknown           Constant 31?
-576          unknown                    unknown           Constant 9?
-...
+552-571      firing sequence            uint8             Marker firing order for active tools
+572-575      tracking LED               uint8             Marker index, 31 indicates none
+573-575      LED 1, 2, 3                uint8             Marker index, 31 indicates none
+576          tool in port diode         unknown           8 is none, 9 is present, default present
+577-579      switch 1, 2, 3             bool              0 is none, 1 is present, default none
 580-591      tool manufacturer          ASCII string      Max length 12 characters
 592-611      part number                ASCII string      Max length 20 characters
-...
-612          unknown                    unknown           Constant 9?
+612          unknown                    unknown           Constant 9 or 17?
 613-632      marker faces               uint8             Index of face assigned to each marker
-633-652      unknown, more faces?       unknown
-653-654      unknown                    unknown           Constant 128, 0?
+633-652      marker groups              uint8             Index of group assigned to each marker, default is 1
+653          enhanced algorithm flags   uint8             Bit 7 is "unique geometry", bit 2 is "three-marker locking" for active tools
+...
 655          marker type                uint8             Enum, Default 41
 656-751      face normals               xyz float32       Max 8 faces
 """
@@ -171,22 +174,24 @@ class ROMHeader(Struct):
 
 
 class ROMGeometry(Struct):
-    minimum_marker_angle = Field(UInt8, 90)
+    maximum_marker_angle = Field(UInt8, 90)
     p1 = Field(Padding(3))
     marker_count = Field(UInt8)
     p2 = Field(Padding(3))
     minimum_marker_count = Field(UInt8, 3)
     p3 = Field(Padding(3))
-    minimum_marker_error = Field(Float32, 2.0)
+    maximum_marker_error = Field(Float32, 2.0)
     p4 = Field(Padding(32))
     markers = Field(Array(Vector3f, 20))
     marker_normals = Field(Array(Vector3f, 20))
-    p5 = Field(Constant([0, 1, 2]))
-    p6 = Field(Padding(17))
-    p7 = Field(Constant([31, 31, 31, 31, 9, 0, 0, 0]))
+    firing_sequence = Field(Array(UInt8, 20))
+    LEDs = Field(Constant([31, 31, 31, 31]))
+    tool_in_port = Field(Constant([9]))
+    switches = Field(Constant([0, 0, 0]))
 
     def pre_encode(self):
         self.marker_count = len(self.markers)
+        self.firing_sequence = np.arange(0, self.marker_count)
         if len(self.marker_normals) == 0:
             self.marker_normals = np.empty((0, 3), dtype=np.float32)
             normal = np.array([[0.0, 0.0, 1.0]])
@@ -208,7 +213,8 @@ class ROMToolDetails(Struct):
 class ROMFaceGeometry(Struct):
     marker_faces = Field(Array(UInt8, 20))
     other_assignments = Field(Array(UInt8, 20))
-    p1 = Field(Constant([128, 0]))
+    alg_flags = Field(Constant([128]))
+    p1 = Field(Padding(1))
     marker_type = Field(Enum(marker_types, 41))
     face_normals = Field(Array(Vector3f, 8))
 
