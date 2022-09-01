@@ -270,15 +270,3 @@ class NDIToolDefinition(Struct):
 
     def __dir__(self):
         return self.to_dict().keys()
-
-    @staticmethod
-    def from_saw(tool_id: int, fiducials):
-        tool_definition = NDIToolDefinition()
-        tool_definition.header.date = datetime.date.today()
-        tool_definition.geometry.markers = fiducials
-
-        return tool_definition
-
-    def to_saw(self):
-        markers = self.geometry.markers
-        return tool_converter.SAWToolDefinition(None, markers)
